@@ -1,0 +1,12 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: graphrag-ollama
+    ports:
+      - "11490:11434"
+    volumes:
+      - graphrag_ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  graphrag_ollama:

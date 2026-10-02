@@ -5,82 +5,171 @@
 
 Книга: `book.txt` в корне (UTF-8 или Windows-1251). Код её не копирует и query не читает целиком.
 
+Голая команда `graphrag-lab` в PATH не обязана быть. Всегда вызывайте exe из `.venv`.
+
 ## Требования
 
 - Python 3.11+
-- Уже запущенный Ollama: `http://localhost:49794/`
+- Docker
+- Ollama **этого** проекта: контейнер `graphrag-ollama`, порт `11490`
 - Модели: `gemma3:4b-it-q4_K_M`, `mxbai-embed-large`
 
-Ollama не поднимайте и не останавливайте из этого репозитория. Порт зафиксирован.
+Чужие контейнеры Ollama не трогать. Этот стек живёт в `docker-compose.yml` и не делит том с другими проектами.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+docker compose up -d
+.\scripts\pull_models.cmd
+Invoke-RestMethod http://localhost:11490/api/tags
 ```
 
-Проверка моделей:
+Стоп только своего контейнера:
 
 ```powershell
-curl http://localhost:49794/api/tags
+docker compose stop
+docker compose start
+docker compose down
 ```
+
+`down` без `-v` модели в томе `graphrag_ollama` сохраняет. `-v` сотрёт скачанные веса.
 
 ## Команды
 
+Из корня репозитория:
+
 ```powershell
-graphrag-lab stage list --index indexes/book
-graphrag-lab stage status --index indexes/book
-graphrag-lab stage show --index indexes/book --stage extract --limit 20
-graphrag-lab stage run --index indexes/book --stage chunk --input book.txt
-graphrag-lab llm pending --index indexes/book
-graphrag-lab llm prompt --index indexes/book
-graphrag-lab llm ingest --index indexes/book --file response.json
-graphrag-lab ask --index indexes/book --mode local "вопрос"
-graphrag-lab chat --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe stage list --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe stage status --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe stage show --index indexes/book --stage extract --limit 20
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage chunk --input book.txt
+.\.venv\Scripts\graphrag-lab.exe llm pending --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe llm prompt --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe llm ingest --index indexes/book --file response.json
+.\.venv\Scripts\graphrag-lab.exe ask --index indexes/book --mode local "вопрос"
+.\.venv\Scripts\graphrag-lab.exe chat --index indexes/book
 ```
 
 По умолчанию одна стадия за запуск. `--from/--to` только для локальных стадий, не для `resolve`/`report`.
 Повтор стадии: `--force` (следующие станут `stale`).
 
+## Как остановить
+
+Чужой Ollama не трогать. Свой: `docker compose stop` / `docker compose start`.
+
+| Процесс | Старт | Стоп |
+| --- | --- | --- |
+| любая `stage run` (chunk, extract, verify, graph, leiden, embed) | команда `stage run` в терминале | в том же окне `Ctrl+C` |
+| extract / verify после обрыва | снова та же `stage run` | продолжит с незакрытых чанков; `Ctrl+C` |
+| resolve / report, пока `waiting_llm` | пайплайн сам вышел после записи промпта | процесс уже не бежит; промпт не трогать |
+| chat | `chat` | `/quit` или `Ctrl+C` |
+| зависший Python, если `Ctrl+C` не взял | — | `Get-Process graphrag-lab, python \| Where-Object { $_.Path -like '*GraphRAG*' } \| Stop-Process` |
+| Docker Ollama | уже поднят | не стопать |
+
+После `Ctrl+C` смотрите статус:
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage status --index indexes/book
+```
+
+Закрытие окна терминала убивает процесс, но не пишет `done`. Статус мог остаться `running`. Это не значит, что extract ещё работает.
+
+Сброс флага (прогресс чанков не трёт):
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage abort --index indexes/book --stage extract
+.\.venv\Scripts\graphrag-lab.exe stage status --index indexes/book
+```
+
+`status` сам помечает `running` как `interrupted`, если процесса уже нет. Потом снова запустите ту же стадию — она продолжит с незакрытых чанков, без `--force`.
+
 ## Чеклист оператора
 
-Перед каждой стадией: `stage status`. Дальше только если предыдущая `done`.
+Перед каждой стадией:
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage status --index indexes/book
+```
+
+Дальше только если предыдущая `done`.
 
 1. **chunk** — нарезка, без LLM.
-   `graphrag-lab stage run --index indexes/book --stage chunk --input book.txt`
-   Проверьте: чанки 500–800 токенов, не «одна глава = один чанк».
 
-2. **extract** — локальная Gemma, можно оставить на ночь. Обрыв продолжается.
-   `graphrag-lab stage run --index indexes/book --stage extract`
-   Смотрите 20 примеров и долю `failed`. Если failed > ~15% — не гоните verify.
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage chunk --input book.txt
+```
+
+Стоп: `Ctrl+C`. Проверьте: чанки 500–800 токенов, не «одна глава = один чанк».
+
+2. **extract** — локальная Gemma, можно оставить на ночь.
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage extract
+```
+
+Стоп: `Ctrl+C` в этом окне. Следующий запуск продолжит. Смотрите `failed` через `stage show`. Если failed > ~15% — не гоните verify.
 
 3. **verify** — та же Gemma сверяет связи с чанком.
-   `graphrag-lab stage run --index indexes/book --stage verify`
-   На следующую стадию идут только accepted.
 
-4. **resolve** — пайплайн пишет промпт и ждёт.
-   `graphrag-lab stage run --index indexes/book --stage resolve`
-   Затем цикл: `llm prompt` → внешняя модель → JSON по `schema.json` → `llm ingest --file response.json`.
-   Пока `llm pending` не пуст, повторяйте. Битый JSON не применяется.
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage verify
+```
+
+Стоп: `Ctrl+C`. На следующую стадию идут только accepted.
+
+4. **resolve** — пайплайн пишет промпт и сразу выходит в `waiting_llm`.
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage resolve
+.\.venv\Scripts\graphrag-lab.exe llm pending --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe llm prompt --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe llm ingest --index indexes/book --file response.json
+```
+
+Стоп: процесс run уже не висит. Не отправляйте ingest, если передумали: статус останется `waiting_llm`. Битый JSON не применяется.
 
 5. **graph** — без LLM.
-   `graphrag-lab stage run --index indexes/book --stage graph`
-   Смотрите узлы, рёбра, компоненты.
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage graph
+```
+
+Стоп: `Ctrl+C`.
 
 6. **leiden** — авторский `leidenalg`, seed=42.
-   `graphrag-lab stage run --index indexes/book --stage leiden`
-   Если один кластер на всю книгу или пыль одиночек — меняйте `leiden.resolutions` в `config/index.yaml` и `--force`.
 
-7. **report** — снова mailbox по уровням.
-   `graphrag-lab stage run --index indexes/book --stage report`
-   Тот же цикл prompt → ingest. После ingest пайплайн сам соберёт следующий уровень.
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage leiden
+```
+
+Стоп: `Ctrl+C`. Если один кластер на всю книгу — меняйте `leiden.resolutions` в `config/index.yaml` и `--force`.
+
+7. **report** — mailbox по уровням.
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage report
+.\.venv\Scripts\graphrag-lab.exe llm prompt --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe llm ingest --index indexes/book --file response.json
+```
+
+Стоп: как у resolve. После ingest пайплайн сам соберёт следующий уровень.
 
 8. **embed** — локальный `mxbai-embed-large`.
-   `graphrag-lab stage run --index indexes/book --stage embed`
-   После `done` можно спрашивать.
 
-**Вопросы.** `graphrag-lab chat --index indexes/book` или `ask --mode local|global|vector`.
-Если `embed` не `done` — отказ. В ответе должны быть цитаты.
+```powershell
+.\.venv\Scripts\graphrag-lab.exe stage run --index indexes/book --stage embed
+```
+
+Стоп: `Ctrl+C`. После `done` можно спрашивать.
+
+**Вопросы.**
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe chat --index indexes/book
+.\.venv\Scripts\graphrag-lab.exe ask --index indexes/book --mode local "вопрос"
+```
+
+Стоп чата: `/quit` или `Ctrl+C`. Если `embed` не `done` — отказ.
 
 ## Артефакт
 
@@ -97,7 +186,5 @@ indexes/book/
 ## Тесты
 
 ```powershell
-pytest
+.\.venv\Scripts\python.exe -m pytest
 ```
-
-Тесты не читают `book.txt` и не требуют модель.

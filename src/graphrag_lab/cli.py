@@ -6,7 +6,8 @@ from typing import Optional
 
 import typer
 
-from graphrag_lab.indexing.runner import ingest_mailbox, open_store, run_range, run_stage
+from graphrag_lab.indexing.locks import reconcile_running
+from graphrag_lab.indexing.runner import abort_stage, ingest_mailbox, open_store, run_range, run_stage
 from graphrag_lab.mailbox import Mailbox
 from graphrag_lab.models import STAGE_ORDER
 from graphrag_lab.query.answer import ask as ask_index
@@ -26,8 +27,10 @@ def _index(path: Path) -> Path:
 
 @stage_app.command("list")
 def stage_list(index: Path = typer.Option(Path("indexes/book"), "--index")) -> None:
-    store = open_store(_index(index))
+    index = _index(index)
+    store = open_store(index)
     try:
+        reconcile_running(store, index)
         for row in store.all_stages():
             typer.echo(f"{row['name']:10} {row['status']}")
     finally:
@@ -36,8 +39,10 @@ def stage_list(index: Path = typer.Option(Path("indexes/book"), "--index")) -> N
 
 @stage_app.command("status")
 def stage_status(index: Path = typer.Option(Path("indexes/book"), "--index")) -> None:
-    store = open_store(_index(index))
+    index = _index(index)
+    store = open_store(index)
     try:
+        reconcile_running(store, index)
         for row in store.all_stages():
             stats = row.get("stats_json") or ""
             typer.echo(f"{row['name']:10} {row['status']:12} {stats}")
@@ -102,6 +107,18 @@ def stage_run(
     if stats.get("waiting"):
         mailbox = Mailbox(index)
         typer.echo(f"waiting_llm prompt={mailbox.prompt_path()}")
+
+
+@stage_app.command("abort")
+def stage_abort(
+    index: Path = typer.Option(Path("indexes/book"), "--index"),
+    stage: Optional[str] = typer.Option(None, "--stage"),
+) -> None:
+    changed = abort_stage(_index(index), stage)
+    if not changed:
+        typer.echo("nothing to abort")
+        return
+    typer.echo("interrupted: " + ", ".join(changed))
 
 
 @llm_app.command("pending")

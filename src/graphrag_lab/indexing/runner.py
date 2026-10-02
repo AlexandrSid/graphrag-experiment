@@ -9,6 +9,7 @@ from graphrag_lab.indexing.communities import run_leiden
 from graphrag_lab.indexing.embed import run_embed
 from graphrag_lab.indexing.extract_stage import run_extract
 from graphrag_lab.indexing.graph import run_graph
+from graphrag_lab.indexing.locks import clear_lock, reconcile_running, write_lock
 from graphrag_lab.indexing.report_stage import ingest_report, start_report
 from graphrag_lab.indexing.resolve_stage import ingest_resolve, start_resolve
 from graphrag_lab.indexing.verify_stage import run_verify
@@ -48,6 +49,21 @@ def ensure_ready(store: IndexStore, stage: str, force: bool) -> None:
         raise RuntimeError(f"Stage '{stage}' is already done. Re-run with --force")
 
 
+def abort_stage(index_dir: Path, stage: str | None = None) -> list[str]:
+    store = open_store(index_dir)
+    try:
+        names = [stage] if stage else [row["name"] for row in store.all_stages() if row["status"] == "running"]
+        changed: list[str] = []
+        for name in names:
+            if store.stage_status(name) == "running":
+                store.set_stage(name, "interrupted")
+                clear_lock(index_dir, name)
+                changed.append(name)
+        return changed
+    finally:
+        store.close()
+
+
 def _reset_stage_data(store: IndexStore, stage: str) -> None:
     if stage == "chunk":
         store.conn.execute("DELETE FROM text_units")
@@ -85,11 +101,13 @@ def run_stage(
     store = open_store(index_dir)
     mailbox = Mailbox(index_dir)
     try:
+        reconcile_running(store, index_dir)
         ensure_ready(store, stage, force)
         if force:
             store.mark_stale_after(stage)
             _reset_stage_data(store, stage)
         store.set_stage(stage, "running", started_at=_now())
+        write_lock(index_dir, stage)
         log_path = index_dir / "logs" / "index.jsonl"
         stats: dict
         if stage == "chunk":
@@ -171,10 +189,15 @@ def run_stage(
             store.set_stage(stage, "done", stats=stats, finished_at=_now())
             return stats
         raise ValueError(stage)
+    except KeyboardInterrupt:
+        store.set_stage(stage, "interrupted", finished_at=_now())
+        raise
     except Exception:
         store.set_stage(stage, "failed", finished_at=_now())
         raise
     finally:
+        if store.stage_status(stage) != "running":
+            clear_lock(index_dir, stage)
         store.close()
 
 

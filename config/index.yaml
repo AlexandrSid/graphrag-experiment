@@ -1,5 +1,5 @@
 ollama:
-  host: http://localhost:49794
+  host: http://localhost:11490
   chat_model: gemma3:4b-it-q4_K_M
   embed_model: mxbai-embed-large
   timeout_s: 300

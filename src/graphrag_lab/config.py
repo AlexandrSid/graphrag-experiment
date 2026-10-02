@@ -21,7 +21,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 def ollama_settings(cfg: dict[str, Any]) -> dict[str, Any]:
     section = dict(cfg.get("ollama") or {})
-    section["host"] = os.environ.get("OLLAMA_HOST", section.get("host", "http://localhost:49794"))
+    section["host"] = os.environ.get("OLLAMA_HOST", section.get("host", "http://localhost:11490"))
     section["chat_model"] = os.environ.get("OLLAMA_CHAT_MODEL", section.get("chat_model", "gemma3:4b-it-q4_K_M"))
     section["embed_model"] = os.environ.get("OLLAMA_EMBED_MODEL", section.get("embed_model", "mxbai-embed-large"))
     return section
