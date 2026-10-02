@@ -1,0 +1,24 @@
+ollama:
+  host: http://localhost:49794
+  chat_model: gemma3:4b-it-q4_K_M
+  embed_model: mxbai-embed-large
+  timeout_s: 300
+  extract_retries: 2
+
+chunking:
+  target_tokens: 650
+  min_tokens: 500
+  max_tokens: 800
+  overlap_tokens: 100
+
+leiden:
+  seed: 42
+  n_iterations: 2
+  resolutions: [1.5, 1.0]
+  min_community_size: 2
+
+mailbox:
+  max_prompt_tokens: 200000
+
+prompts:
+  version: "1"

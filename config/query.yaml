@@ -1,0 +1,13 @@
+ollama:
+  host: http://localhost:49794
+  chat_model: gemma3:4b-it-q4_K_M
+  embed_model: mxbai-embed-large
+  timeout_s: 180
+
+retrieval:
+  vector_top_k: 8
+  entity_top_k: 5
+  community_top_k: 6
+  max_hops: 1
+  max_chunks: 10
+  max_packet_tokens: 1800
