@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 
 from graphrag_lab.indexing.locks import reconcile_running
-from graphrag_lab.indexing.runner import abort_stage, ingest_mailbox, open_store, run_range, run_stage
+from graphrag_lab.indexing.runner import abort_stage, ingest_mailbox, open_store, run_range, run_stage, stop_stage
 from graphrag_lab.mailbox import Mailbox
 from graphrag_lab.models import STAGE_ORDER
 from graphrag_lab.query.answer import ask as ask_index
@@ -119,6 +119,15 @@ def stage_abort(
         typer.echo("nothing to abort")
         return
     typer.echo("interrupted: " + ", ".join(changed))
+
+
+@stage_app.command("stop")
+def stage_stop(
+    index: Path = typer.Option(Path("indexes/book"), "--index"),
+    stage: Optional[str] = typer.Option(None, "--stage"),
+) -> None:
+    result = stop_stage(_index(index), stage)
+    typer.echo(json.dumps(result, ensure_ascii=False))
 
 
 @llm_app.command("pending")

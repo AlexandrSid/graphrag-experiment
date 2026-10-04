@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
+
+from graphrag_lab.indexing.cancel import write_stop
 
 
 def lock_path(index_dir: Path, stage: str) -> Path:
@@ -38,6 +41,18 @@ def lock_pid(index_dir: Path, stage: str) -> int | None:
     if not raw.isdigit():
         return None
     return int(raw)
+
+
+def kill_lock_owner(index_dir: Path, stage: str) -> int | None:
+    write_stop(index_dir, stage)
+    pid = lock_pid(index_dir, stage)
+    if pid is None or not pid_alive(pid):
+        return None
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False, capture_output=True)
+    else:
+        os.kill(pid, 15)
+    return pid
 
 
 def owner_alive(index_dir: Path, stage: str) -> bool:

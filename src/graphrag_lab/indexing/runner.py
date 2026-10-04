@@ -9,7 +9,9 @@ from graphrag_lab.indexing.communities import run_leiden
 from graphrag_lab.indexing.embed import run_embed
 from graphrag_lab.indexing.extract_stage import run_extract
 from graphrag_lab.indexing.graph import run_graph
-from graphrag_lab.indexing.locks import clear_lock, reconcile_running, write_lock
+from graphrag_lab.indexing.cancel import bind as bind_cancel
+from graphrag_lab.indexing.cancel import install_handlers, unbind
+from graphrag_lab.indexing.locks import clear_lock, kill_lock_owner, reconcile_running, write_lock
 from graphrag_lab.indexing.report_stage import ingest_report, start_report
 from graphrag_lab.indexing.resolve_stage import ingest_resolve, start_resolve
 from graphrag_lab.indexing.verify_stage import run_verify
@@ -47,6 +49,21 @@ def ensure_ready(store: IndexStore, stage: str, force: bool) -> None:
     current = store.stage_status(stage)
     if current == "done" and not force:
         raise RuntimeError(f"Stage '{stage}' is already done. Re-run with --force")
+
+
+def stop_stage(index_dir: Path, stage: str | None = None) -> dict:
+    store = open_store(index_dir)
+    try:
+        names = [stage] if stage else [row["name"] for row in store.all_stages() if row["status"] == "running"]
+        killed: list[int] = []
+        for name in names:
+            pid = kill_lock_owner(index_dir, name)
+            if pid:
+                killed.append(pid)
+        changed = abort_stage(index_dir, stage)
+        return {"interrupted": changed, "killed_pids": killed}
+    finally:
+        store.close()
 
 
 def abort_stage(index_dir: Path, stage: str | None = None) -> list[str]:
@@ -102,6 +119,8 @@ def run_stage(
     mailbox = Mailbox(index_dir)
     try:
         reconcile_running(store, index_dir)
+        bind_cancel(index_dir, stage)
+        install_handlers()
         ensure_ready(store, stage, force)
         if force:
             store.mark_stale_after(stage)
@@ -198,6 +217,7 @@ def run_stage(
     finally:
         if store.stage_status(stage) != "running":
             clear_lock(index_dir, stage)
+        unbind()
         store.close()
 
 

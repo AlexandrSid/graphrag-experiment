@@ -16,6 +16,15 @@ def test_reconcile_dead_running(tmp_path: Path) -> None:
     store.close()
 
 
+def test_stop_writes_flag(tmp_path: Path) -> None:
+    from graphrag_lab.indexing.cancel import bind, stopped
+    from graphrag_lab.indexing.locks import kill_lock_owner
+
+    bind(tmp_path, "extract")
+    kill_lock_owner(tmp_path, "extract")
+    assert stopped()
+
+
 def test_abort_stage(tmp_path: Path) -> None:
     store = IndexStore(tmp_path)
     store.set_stage("extract", "running")

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import httpx
+
+from graphrag_lab.indexing.cancel import check
 
 
 class OllamaError(RuntimeError):
@@ -42,6 +45,25 @@ class OllamaClient:
                 f"Available: {', '.join(sorted(n for n in available if n)) or '(none)'}"
             )
 
+    def _post(self, path: str, body: dict[str, Any]) -> httpx.Response:
+        box: dict[str, Any] = {}
+
+        def work() -> None:
+            try:
+                with self._client() as client:
+                    box["response"] = client.post(path, json=body)
+            except Exception as exc:  # noqa: BLE001
+                box["error"] = exc
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        while thread.is_alive():
+            thread.join(0.2)
+            check()
+        if "error" in box:
+            raise box["error"]
+        return box["response"]
+
     def chat_json(
         self,
         model: str,
@@ -56,13 +78,14 @@ class OllamaClient:
             "format": schema,
             "options": {"temperature": temperature},
         }
-        with self._client() as client:
-            try:
-                response = client.post("/api/chat", json=body)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise OllamaError(f"Ollama chat failed: {exc}") from exc
-            payload = response.json()
+        try:
+            response = self._post("/api/chat", body)
+            response.raise_for_status()
+        except KeyboardInterrupt:
+            raise
+        except httpx.HTTPError as exc:
+            raise OllamaError(f"Ollama chat failed: {exc}") from exc
+        payload = response.json()
         message = payload.get("message") or {}
         content = message.get("content") or "{}"
         if isinstance(content, dict):

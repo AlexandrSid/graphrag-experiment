@@ -250,7 +250,7 @@ class IndexStore:
         )
         self.conn.executemany(
             """
-            INSERT INTO raw_relationships(id, chunk_id, source, target, rel_type, description, quote, confidence, status)
+            INSERT OR REPLACE INTO raw_relationships(id, chunk_id, source, target, rel_type, description, quote, confidence, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'raw')
             """,
             [

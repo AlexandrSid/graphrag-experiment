@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from graphrag_lab.indexing.cancel import check
+from graphrag_lab.indexing.progress import log
 
 from graphrag_lab.agents.verify import verify_chunk
 from graphrag_lab.config import ollama_settings
@@ -22,26 +24,39 @@ def run_verify(store: IndexStore, cfg: dict, log_path) -> dict:
 
     this_ok = 0
     this_fail = 0
-    for chunk_id, rels in by_chunk.items():
+    total = len(by_chunk)
+    log(f"verify start: {total} chunks, {len(pending)} relationships")
+    for index, (chunk_id, rels) in enumerate(by_chunk.items(), start=1):
+        check()
         unit = store.text_unit(chunk_id)
         if unit is None:
             for rel in rels:
                 store.save_verify(rel["id"], False, "missing chunk", "")
+            log(f"verify {index}/{total} {chunk_id} missing chunk, rejected {len(rels)}")
             continue
+        log(f"verify {index}/{total} {chunk_id} checking {len(rels)} relationships...")
         try:
             payload = verify_chunk(client, settings["chat_model"], unit["text"], rels, retries=retries)
             verdicts = {v.relationship_key: v for v in payload.verdicts}
+            accepted_n = 0
+            rejected_n = 0
             for rel in rels:
                 verdict = verdicts.get(rel["id"])
                 if verdict is None:
                     store.save_verify(rel["id"], False, "no verdict from verifier", rel.get("quote", ""))
+                    rejected_n += 1
                 else:
                     store.save_verify(rel["id"], verdict.accepted, verdict.reason, verdict.quote or rel.get("quote", ""))
+                    if verdict.accepted:
+                        accepted_n += 1
+                    else:
+                        rejected_n += 1
             append_jsonl(
                 log_path,
                 {"ts": datetime.now(timezone.utc).isoformat(), "stage": "verify", "chunk_id": chunk_id, "ok": True},
             )
             this_ok += 1
+            log(f"verify {index}/{total} {chunk_id} ok accepted={accepted_n} rejected={rejected_n}")
         except OllamaError as exc:
             append_jsonl(
                 log_path,
@@ -54,6 +69,7 @@ def run_verify(store: IndexStore, cfg: dict, log_path) -> dict:
                 },
             )
             this_fail += 1
+            log(f"verify {index}/{total} {chunk_id} FAIL {exc}")
             for rel in rels:
                 if store.conn.execute(
                     "SELECT 1 FROM verify_jobs WHERE relationship_id = ?", (rel["id"],)
@@ -66,6 +82,8 @@ def run_verify(store: IndexStore, cfg: dict, log_path) -> dict:
 
     accepted = store.count("raw_relationships", "status = 'accepted'")
     rejected = store.count("raw_relationships", "status = 'rejected'")
+    pending_left = store.count("raw_relationships", "status = 'raw'")
+    log(f"verify finished: accepted={accepted} rejected={rejected} pending={pending_left}")
     write_jsonl(
         store.index_dir / "exports" / "verify" / "relationships.jsonl",
         [dict(r) for r in store.raw_relationships()],

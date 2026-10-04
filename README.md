@@ -59,8 +59,8 @@ docker compose down
 
 | Процесс | Старт | Стоп |
 | --- | --- | --- |
-| любая `stage run` (chunk, extract, verify, graph, leiden, embed) | команда `stage run` в терминале | в том же окне `Ctrl+C` |
-| extract / verify после обрыва | снова та же `stage run` | продолжит с незакрытых чанков; `Ctrl+C` |
+| любая `stage run` | команда `stage run` в терминале | в другом окне `stage stop` (Ctrl+C в Cursor часто не доходит) |
+| extract / verify после обрыва | снова та же `stage run` | продолжит с незакрытых чанков |
 | resolve / report, пока `waiting_llm` | пайплайн сам вышел после записи промпта | процесс уже не бежит; промпт не трогать |
 | chat | `chat` | `/quit` или `Ctrl+C` |
 | зависший Python, если `Ctrl+C` не взял | — | `Get-Process graphrag-lab, python \| Where-Object { $_.Path -like '*GraphRAG*' } \| Stop-Process` |
@@ -72,14 +72,14 @@ docker compose down
 .\.venv\Scripts\graphrag-lab.exe stage status --index indexes/book
 ```
 
-Закрытие окна терминала убивает процесс, но не пишет `done`. Статус мог остаться `running`. Это не значит, что extract ещё работает.
-
-Сброс флага (прогресс чанков не трёт):
+Остановка extract/verify из **другого** терминала (надёжнее Ctrl+C):
 
 ```powershell
-.\.venv\Scripts\graphrag-lab.exe stage abort --index indexes/book --stage extract
+.\.venv\Scripts\graphrag-lab.exe stage stop --index indexes/book --stage extract
 .\.venv\Scripts\graphrag-lab.exe stage status --index indexes/book
 ```
+
+`stop` убивает процесс по pid и ставит `interrupted`. Прогресс чанков не трётся. Потом тот же `stage run` без `--force`.
 
 `status` сам помечает `running` как `interrupted`, если процесса уже нет. Потом снова запустите ту же стадию — она продолжит с незакрытых чанков, без `--force`.
 
