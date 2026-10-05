@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import igraph as ig
 
+from graphrag_lab.indexing.resolve_stage import rebuild_relationships
 from graphrag_lab.storage.sqlite import IndexStore
 from graphrag_lab.util import write_jsonl
 
@@ -31,6 +32,7 @@ def build_igraph(store: IndexStore) -> ig.Graph:
 
 
 def run_graph(store: IndexStore) -> dict:
+    rebuilt = rebuild_relationships(store)
     graph = build_igraph(store)
     components = graph.components().sizes() if graph.vcount() else []
     stats = {
@@ -39,6 +41,7 @@ def run_graph(store: IndexStore) -> dict:
         "components": len(components),
         "largest_component": max(components) if components else 0,
         "isolates": sum(1 for size in components if size == 1),
+        **rebuilt,
     }
     store.set_graph_stat("graph", stats)
     write_jsonl(

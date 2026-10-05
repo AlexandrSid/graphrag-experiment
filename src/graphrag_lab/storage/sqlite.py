@@ -303,7 +303,7 @@ class IndexStore:
 
     def accepted_raw(self) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT * FROM raw_relationships WHERE status = 'accepted'"
+            "SELECT * FROM raw_relationships WHERE status IN ('accepted', 'verified')"
         ).fetchall()
 
     def raw_entities(self) -> list[sqlite3.Row]:
@@ -364,6 +364,37 @@ class IndexStore:
         self.conn.executemany(
             "INSERT OR REPLACE INTO merges(alias, canonical_id) VALUES (?, ?)",
             merges,
+        )
+        self.conn.commit()
+
+    def replace_relationships(
+        self,
+        relationships: list[dict[str, Any]],
+        evidence: list[dict[str, Any]],
+    ) -> None:
+        self.conn.execute("DELETE FROM relationships")
+        self.conn.execute("DELETE FROM relationship_evidence")
+        self.conn.executemany(
+            """
+            INSERT INTO relationships(id, source_id, target_id, rel_type, description, weight, confidence, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'canonical')
+            """,
+            [
+                (
+                    r["id"],
+                    r["source_id"],
+                    r["target_id"],
+                    r.get("rel_type", "related"),
+                    r.get("description", ""),
+                    float(r.get("weight") or 1.0),
+                    float(r.get("confidence") or 0.5),
+                )
+                for r in relationships
+            ],
+        )
+        self.conn.executemany(
+            "INSERT INTO relationship_evidence(relationship_id, chunk_id, quote) VALUES (?, ?, ?)",
+            [(e["relationship_id"], e["chunk_id"], e["quote"]) for e in evidence],
         )
         self.conn.commit()
 

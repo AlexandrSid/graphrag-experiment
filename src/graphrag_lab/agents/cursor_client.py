@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -21,8 +21,6 @@ class CursorCliClient:
         schema: dict[str, Any] | None = None,
         temperature: float = 0.0,
     ) -> dict[str, Any]:
-        """Отправляет запрос через Cursor CLI и парсит результирующий JSON."""
-        # Собираем контекст и инструкцию строгого JSON
         prompt_parts: list[str] = []
         for msg in messages:
             role = msg.get("role", "user").upper()
@@ -59,11 +57,11 @@ class CursorCliClient:
                 text=True,
                 check=False,
                 encoding="utf-8",
+                shell=True,
             )
         except FileNotFoundError as exc:
             raise CursorCliError(
-                f"Команда '{self.executable}' не найдена в PATH. "
-                "Убедитесь, что Cursor CLI установлен (в Cursor: Cmd/Ctrl+Shift+P -> 'Install cursor command')."
+                f"Команда '{self.executable}' не найдена в PATH."
             ) from exc
 
         if result.returncode != 0:
@@ -75,15 +73,11 @@ class CursorCliClient:
 
     @staticmethod
     def _extract_json(text: str) -> dict[str, Any]:
-        """Очищает вывод от возможных markdown-тегов и ищет JSON-структуру."""
         cleaned = text.strip()
-
-        # Если модель всё же обернула в ```json ... ```
         code_block = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
         if code_block:
             cleaned = code_block.group(1).strip()
 
-        # Ищем первый { и последний }
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:

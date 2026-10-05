@@ -225,6 +225,62 @@ def ingest_resolve(store: IndexStore, mailbox: Mailbox, response, cfg: dict) -> 
     return nxt
 
 
+def rebuild_relationships(store: IndexStore) -> dict:
+    store.conn.execute("UPDATE raw_relationships SET status = 'accepted' WHERE status = 'verified'")
+    store.conn.commit()
+    accepted = [dict(row) for row in store.accepted_raw()]
+    canon_of = _canon_map(store)
+    rels: dict[str, dict] = {}
+    evidence: list[dict] = []
+    skipped_unmapped = 0
+    skipped_self = 0
+    for row in accepted:
+        sid = canon_of.get(str(row["source"]).strip().lower())
+        tid = canon_of.get(str(row["target"]).strip().lower())
+        if not sid or not tid:
+            skipped_unmapped += 1
+            continue
+        if sid == tid:
+            skipped_self += 1
+            continue
+        rid = stable_id(sid, tid, row["rel_type"], prefix="e")
+        if rid not in rels:
+            rels[rid] = {
+                "id": rid,
+                "source_id": sid,
+                "target_id": tid,
+                "rel_type": row["rel_type"],
+                "description": row["description"],
+                "weight": 1.0,
+                "confidence": row["confidence"],
+            }
+        else:
+            rels[rid]["weight"] = float(rels[rid]["weight"]) + 1.0
+        evidence.append({"relationship_id": rid, "chunk_id": row["chunk_id"], "quote": row["quote"]})
+    store.replace_relationships(list(rels.values()), evidence)
+    return {
+        "accepted_raw": len(accepted),
+        "relationships_written": len(rels),
+        "skipped_unmapped": skipped_unmapped,
+        "skipped_self": skipped_self,
+    }
+
+
+def _canon_map(store: IndexStore) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for row in store.entities():
+        aliases = _as_list(row["aliases_json"])
+        for name in [row["name"], *aliases]:
+            key = str(name).strip().lower()
+            if key:
+                mapping.setdefault(key, row["id"])
+    for row in store.conn.execute("SELECT alias, canonical_id FROM merges"):
+        key = str(row["alias"]).strip().lower()
+        if key:
+            mapping[key] = row["canonical_id"]
+    return mapping
+
+
 def existing_id_for(existing: dict, name: str) -> str | None:
     key = name.strip().lower()
     for eid, row in existing.items():
