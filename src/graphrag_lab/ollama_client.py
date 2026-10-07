@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import queue
 import threading
+import time
 from typing import Any
 
 import httpx
@@ -96,6 +99,78 @@ class OllamaClient:
             return json.loads(content)
         except json.JSONDecodeError as exc:
             raise OllamaError(f"Ollama returned non-JSON content: {content[:400]}") from exc
+
+    def chat_json_stream(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
+        temperature: float = 0.0,
+    ) -> tuple[dict[str, Any], float | None, float]:
+        """Stream /api/chat. Returns parsed JSON, seconds to first token, total seconds."""
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "format": schema,
+            "options": {"temperature": temperature},
+        }
+        events: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+        def work() -> None:
+            try:
+                with self._client() as client:
+                    with client.stream("POST", "/api/chat", json=body) as response:
+                        response.raise_for_status()
+                        for line in response.iter_lines():
+                            events.put(("line", line))
+                events.put(("end", None))
+            except Exception as exc:  # noqa: BLE001
+                events.put(("error", exc))
+
+        started = time.perf_counter()
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        parts: list[str] = []
+        ttft: float | None = None
+        while True:
+            try:
+                kind, payload = events.get(timeout=0.2)
+            except queue.Empty:
+                check()
+                if not thread.is_alive() and events.empty():
+                    break
+                continue
+            if kind == "error":
+                if isinstance(payload, KeyboardInterrupt):
+                    raise payload
+                if isinstance(payload, httpx.HTTPError):
+                    raise OllamaError(f"Ollama chat failed: {payload}") from payload
+                raise payload
+            if kind == "end":
+                break
+            if not payload:
+                continue
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError as exc:
+                raise OllamaError(f"Ollama stream returned non-JSON: {str(payload)[:400]}") from exc
+            content = ((event.get("message") or {}).get("content")) or ""
+            if content and ttft is None:
+                ttft = time.perf_counter() - started
+            if content:
+                parts.append(content)
+            if event.get("done"):
+                break
+        total = time.perf_counter() - started
+        text = "".join(parts) or "{}"
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise OllamaError(f"Ollama returned non-JSON content: {text[:400]}") from exc
+        if not isinstance(parsed, dict):
+            raise OllamaError(f"Ollama returned non-object JSON: {text[:400]}")
+        return parsed, ttft, total
 
     def embed(self, model: str, text: str) -> list[float]:
         with self._client() as client:

@@ -11,6 +11,7 @@ from graphrag_lab.indexing.runner import abort_stage, ingest_mailbox, open_store
 from graphrag_lab.mailbox import Mailbox
 from graphrag_lab.models import STAGE_ORDER
 from graphrag_lab.query.answer import ask as ask_index
+from graphrag_lab.query.answer import format_telemetry
 from graphrag_lab.storage.manifest import read_manifest
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -174,19 +175,34 @@ def _print_answer(result) -> None:
     )
 
 
+def _print_trace(trace, debug_prompt: bool) -> None:
+    if debug_prompt:
+        typer.echo(trace.full_prompt)
+        typer.echo("")
+    _print_answer(trace.result)
+    typer.echo(format_telemetry(trace))
+
+
 @app.command()
 def ask(
     question: str = typer.Argument(...),
     index: Path = typer.Option(Path("indexes/book"), "--index"),
     mode: str = typer.Option("local", "--mode"),
+    debug_prompt: bool = typer.Option(False, "--debug-prompt", "--verbose", help="Print the full prompt sent to the model"),
+    dump_dir: Optional[Path] = typer.Option(None, "--dump-dir", help="Directory for per-query JSON traces"),
+    no_rag: bool = typer.Option(False, "--no-rag", help="Ask the same model with an empty RAG context"),
 ) -> None:
-    _print_answer(ask_index(index, question, mode))
+    trace = ask_index(index, question, mode, no_rag=no_rag, dump_dir=dump_dir)
+    _print_trace(trace, debug_prompt)
 
 
 @app.command()
 def chat(
     index: Path = typer.Option(Path("indexes/book"), "--index"),
     mode: str = typer.Option("local", "--mode"),
+    debug_prompt: bool = typer.Option(False, "--debug-prompt", "--verbose", help="Print the full prompt sent to the model"),
+    dump_dir: Optional[Path] = typer.Option(None, "--dump-dir", help="Directory for per-query JSON traces"),
+    no_rag: bool = typer.Option(False, "--no-rag", help="Ask the same model with an empty RAG context"),
 ) -> None:
     current = mode
     typer.echo("GraphRAG chat. /mode local|global|vector  /quit")
@@ -209,7 +225,8 @@ def chat(
                 typer.echo("use /mode local|global|vector")
             continue
         try:
-            _print_answer(ask_index(index, line, current))
+            trace = ask_index(index, line, current, no_rag=no_rag, dump_dir=dump_dir)
+            _print_trace(trace, debug_prompt)
         except Exception as exc:  # noqa: BLE001
             typer.echo(f"error: {exc}")
 

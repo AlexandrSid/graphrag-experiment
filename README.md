@@ -188,3 +188,34 @@ indexes/book/
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+## Слепой тест: граф или память модели
+
+`ask` и `chat` после каждого ответа печатают плашку: время ретривала, время до первого токена, полное время генерации и оценку токенов контекста и ответа. Тот же след пишется в JSON: `indexes/book/logs/queries/`. Свой каталог — `--dump-dir`.
+
+Флаги одни и те же у `ask` и `chat`. В чате они действуют на каждый следующий вопрос. Режим по ходу чата меняется командой `/mode local`, `/mode global` или `/mode vector`.
+
+Показать промпт, который реально ушёл в Ollama. Секции: `=== SYSTEM ===`, `=== RAG CONTEXT ===`, `=== USER QUERY ===`.
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe ask --index indexes/book --mode local --debug-prompt "Кто учил Гарри боевой магии?"
+.\.venv\Scripts\graphrag-lab.exe ask --index indexes/book --mode global --verbose "О чём отчёты сообществ про Хогвартс?"
+```
+
+`--verbose` — то же самое, что `--debug-prompt`.
+
+Слепой прогон: тот же системный промпт и тот же вопрос, но блок RAG пустой. В плашке будет `Baseline: no-rag`. Рядом с обычным ответом это показывает, говорит ли модель из переданного контекста или из собственных весов.
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe ask --index indexes/book --mode local "Кто учил Гарри боевой магии?"
+.\.venv\Scripts\graphrag-lab.exe ask --index indexes/book --mode local --no-rag "Кто учил Гарри боевой магии?"
+```
+
+То же в чате, чтобы задать несколько вопросов подряд:
+
+```powershell
+.\.venv\Scripts\graphrag-lab.exe chat --index indexes/book --mode global --debug-prompt
+.\.venv\Scripts\graphrag-lab.exe chat --index indexes/book --mode local --no-rag
+```
+
+В JSON каждого запуска есть `retrieval_time_s`, `llm_ttft_s`, `llm_total_time_s`, `retrieved_chunks`, `retrieved_communities`, `full_prompt`, `llm_response` и `baseline`. Сравнивайте пару файлов с одним вопросом: обычный и с суффиксом `_norag`.
